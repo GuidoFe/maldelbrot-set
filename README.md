@@ -1,5 +1,5 @@
 # maldelbrot-set
-Attempt to create an interactable mandelbrot-set
+An attempt to create an interactable mandelbrot-set
 
 ![graph](graph_old.png)
 
