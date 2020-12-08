@@ -3,9 +3,10 @@ An attempt to create an interactive mandelbrot-set
 
 ![graph](graph_old.png)
 
-Click with left mouse button to center the selection  
+Click with left mouse button to center the selection. 
 Scroll to change its size  
 Right click to zoom to that selection.  
+Click with the middle mouse button to hide or show the selection.
 The last renderized image will be present in the script folder.  
 Change IM_WIDTH and IM_HEIGHT to change the image resolution. If you change the aspect ration, change it also for the pair GRAPH_WIDTH, GRAPH_HEIGHT (the size of the x and y axis of the graph).  
   
