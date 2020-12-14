@@ -1,4 +1,4 @@
-# maldelbrot-set
+# mandelbrot-set
 An attempt to create an interactive mandelbrot-set
 
 ![graph](graph_old.png)
