@@ -20,6 +20,8 @@ ROWS = 0
 STARTING_TIME=0
 
 # TODO: Set if should save the picture in a screenshot folder
+# TODO: Parse arguments
+# TODO: GUI
 def scaleMatrix(s):
     return [
         [s, Decimal(0),  Decimal(0)],
