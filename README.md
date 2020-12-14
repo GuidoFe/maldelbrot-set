@@ -11,5 +11,3 @@ The last renderized image will be present in the script folder.
 Change IM_WIDTH and IM_HEIGHT to change the image resolution. If you change the aspect ration, change it also for the pair GRAPH_WIDTH, GRAPH_HEIGHT (the size of the x and y axis of the graph).  
   
 Every pixel will be the average of five points covered by the pixel (disposed like the 5 of a die)
-
-![graph](graph.png)
