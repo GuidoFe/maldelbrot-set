@@ -8,30 +8,18 @@ import numpy
 from decimal import *
 from time import time
 import subprocess as s
+import multiprocessing as mp
 
-WINDOW_WIDTH = 683
-WINDOW_HEIGHT = 384
-
-# The image will be rendered in WINDOW_WIDTH*RENDERING_SCALE x WINDOW_HEIGHT*RENDERING_SCALE,
-RENDERING_SCALE = 1
-ORIGIN = numpy.array([Decimal(0), Decimal(0), Decimal(1)])
-
-GRAPH_HEIGHT = Decimal(2)
-GRAPH_WIDTH = Decimal(WINDOW_WIDTH/WINDOW_HEIGHT) * GRAPH_HEIGHT
-MAX_COUNT = 100
-RECT_SCALE_FACTOR=0.1
-RECT_ROT_FACTOR=1
-ANTI_ALIASING = False
-HIDE_GUI = False
-
-
-SHIFT_PRESSED = False
-NEW_RENDERING_SCALE = 1
-isReady = False
-isNew = False
 TWOPLACES = Decimal(10) ** -2
 
+COMPLETED_ROWS = 0
+MAX_VALUE = 0
+MIN_VALUE = math.inf
+VAL_MATRIX = []
+ROWS = 0
+STARTING_TIME=0
 
+# TODO: Set if should save the picture in a screenshot folder
 def scaleMatrix(s):
     return [
         [s, Decimal(0),  Decimal(0)],
@@ -52,12 +40,6 @@ def rotationMatrix(angle):
         [Decimal(0),                Decimal(0),                 Decimal(1)  ]
     ]
 
-
-def applyTransformations(v, list):
-    for m in list:
-        v = numpy.dot(m,v)
-    return v
-
 def iteration(z, c):
     return numpy.array([z[0] ** 2 - z[1] ** 2 + c[0],
                         2 * z[0] * z[1] + c[1],
@@ -67,90 +49,65 @@ def hsl2arcade(h, s, l):
     color=colorsys.hsv_to_rgb(h, s, l)
     return (round(color[0]*255), round(color[1]*255), round(color[2]*255))
 
-
-def resetTransformationParameters():
-    global ANGLE
-    global TRANSLATION
-    ANGLE = 0
-    TRANSLATION = (Decimal(0), Decimal(0))
-
-
-# For elements in the arcade coordinates
-def arcadePointToCenter(p):
-    return numpy.array([Decimal(- WINDOW_WIDTH / 2) + p[0],
-                        Decimal(- WINDOW_HEIGHT / 2) + p[1],
-                        Decimal(1)])
-
-
-M = scaleMatrix(GRAPH_WIDTH/Decimal(WINDOW_WIDTH))
-
-
-def loop():
-    global isNew
-    global isReady
-    global RENDERING_SCALE
-    global ROTATED
-    global ORIGIN
-    isReady = False
-    RENDERING_SCALE = NEW_RENDERING_SCALE
-    m = [[0 for col in range(WINDOW_WIDTH*RENDERING_SCALE*3)] for row in range(WINDOW_HEIGHT*RENDERING_SCALE)]
-    valMatrix = [[0 for col in range(WINDOW_WIDTH*RENDERING_SCALE)] for row in range(WINDOW_HEIGHT*RENDERING_SCALE)]
-    startTime = time()
+def loop(row, windowWidth, windowHeight, renderingScale, M, antiAliasing, maxCount):
     maxVal = 0
-    for row in range(0, WINDOW_HEIGHT*RENDERING_SCALE):
-        for col in range(0, WINDOW_WIDTH*RENDERING_SCALE):
-            #print("Calculating ("+str(col)+", "+str(row)+")")
-            screenPoint = numpy.array([Decimal(col/RENDERING_SCALE-WINDOW_WIDTH/2), Decimal(WINDOW_HEIGHT/2-row/RENDERING_SCALE), Decimal(1)])
-            graphPoint = numpy.dot(M, screenPoint)
-            ANTI_ALIASING = False
-            if ANTI_ALIASING:
-                list = [(r, i),(r-quarter, i+quarter), (r+quarter, i+quarter), (r+quarter, i-quarter), (r-quarter, i-quarter)]
-            else:
-                list = [(graphPoint[0],graphPoint[1])]
-            val = 0
-            for c in list:
-                z = iteration(numpy.array([Decimal(0),
-                                           Decimal(0),
-                                           Decimal(1)]), c)
-                count = 1
-                while count < MAX_COUNT and math.isfinite(z[0]) and math.isfinite(z[1]):
-                    z = iteration(z, c)
-                    count += 1
-                if math.isinf(z[0]) or math.isinf(z[1]):
-                    val += count
-
-            if ANTI_ALIASING:
-                val = val/5
-            valMatrix[row][col]=val
+    minVal = math.inf
+    array = [0]*(windowWidth*renderingScale)
+    for col in range(windowWidth*renderingScale):
+        quarter = abs(numpy.dot(M, numpy.array([Decimal(1/renderingScale * 0.25), Decimal(0), Decimal(1)]))[0])
+        screenPoint = numpy.array([Decimal(col/renderingScale-windowWidth/2), Decimal(windowHeight/2-row/renderingScale), Decimal(1)])
+        graphPoint = numpy.dot(M, screenPoint)
+        r=graphPoint[0]
+        i=graphPoint[1]
+        if antiAliasing:
+            list = [(r-quarter, i+quarter), (r+quarter, i+quarter), (r+quarter, i-quarter), (r-quarter, i-quarter)]
+        else:
+            list = [(r, i),]
+        val = 0
+        for c in list:
+            z = iteration(numpy.array([Decimal(0),
+                                       Decimal(0),
+                                       Decimal(1)]), c)
+            count = 1
+            while count < maxCount and math.isfinite(z[0]) and math.isfinite(z[1]):
+                z = iteration(z, c)
+                count += 1
+            if math.isinf(z[0]) or math.isinf(z[1]):
+                val += count
+        if antiAliasing:
+            val = val/4
+        array[col]=val
+        if val > 0:
             if val > maxVal:
                 maxVal = val
-        done = row*100/(WINDOW_HEIGHT*RENDERING_SCALE)
-        barLen = round(done/10)
-        now = time()
-        if done != 0:
-            remaining = round((now-startTime)/done*(100-done))
-            seconds = remaining % 60
-            minutes = math.floor(remaining / 60) % 60
-            hours = round((remaining - seconds - minutes * 60)/120)
-            remainingString =  " Time remaining {:02d}:{:02d}:{:02d}       ".format(hours, minutes, seconds)
-        else:
-            remainingString = "                                      "
-        print("\r"+"█"*barLen+"░"*(10-barLen)+" {0:.2f}%{1}".format(done, remainingString), end="")
-    for row in range(0, WINDOW_HEIGHT*RENDERING_SCALE):
-        for col in range(0, WINDOW_WIDTH*RENDERING_SCALE):
-            if valMatrix[row][col] != 0:
-                av = hsl2arcade(valMatrix[row][col]/maxVal*0.4, 1, 0.5)
-                m[row][col*3]=av[0]
-                m[row][col*3+1]=av[1]
-                m[row][col*3+2]=av[2]
-    print("\r"+"██████████ 100.00% Done                                         ")
-    f = open('graph.png', 'wb')
-    w = png.Writer(WINDOW_WIDTH*RENDERING_SCALE, WINDOW_HEIGHT*RENDERING_SCALE, greyscale=False)
-    w.write(f, m)
-    f.close()
-    isNew = True
-    isReady = True
-    s.call(['notify-send','Mandelbrot set','Rendering has been completed.'])
+            if val < minVal:
+                minVal = val
+    return (row, minVal, maxVal, array)
+
+def callback_result(result):
+    global MAX_VALUE
+    global MIN_VALUE
+    global VAL_MATRIX
+    global COMPLETED_ROWS
+    if MAX_VALUE < result[2]:
+        MAX_VALUE = result[2]
+    if MIN_VALUE > result[1]:
+        MIN_VALUE = result[1]
+    VAL_MATRIX[result[0]] = result[3]
+    COMPLETED_ROWS += 1
+    done = COMPLETED_ROWS*100/(ROWS)
+    barLen = round(done/10)
+    now = time()
+    # TODO: Draw progress bar on screen
+    if done != 0:
+        remaining = round((now-STARTING_TIME)/done*(100-done))
+        seconds = remaining % 60
+        minutes = math.floor(remaining / 60) % 60
+        hours = round((remaining - seconds - minutes * 60)/120)
+        remainingString =  " Time remaining {:02d}:{:02d}:{:02d}       ".format(hours, minutes, seconds)
+    else:
+        remainingString = "                                      "
+    print("\r"+"█"*barLen+"░"*(10-barLen)+" {0:.2f}%{1}".format(done, remainingString), end="")
 
 class Rect:
     def __init__(self, centerX, centerY, width, height, rotation, visibility):
@@ -184,30 +141,43 @@ class Rect:
         arcade.draw_rectangle_outline(self.centerX, self.centerY, self.width, self.height, arcade.color.WHITE, tilt_angle = self.rotation)
 
 class Visualizer(arcade.Window):
-    def __init__(self):
-        self.rect = Rect(WINDOW_WIDTH/2, WINDOW_HEIGHT/2, WINDOW_WIDTH/4, WINDOW_HEIGHT/4, 0, False)
-        super().__init__(WINDOW_WIDTH, WINDOW_HEIGHT, "Mandelbrot set")
+    def __init__(self, windowWidth, windowHeight, renderingScale = 1, origin = numpy.array([Decimal(0), Decimal(0), Decimal(1)]), graphHeight = Decimal(2),
+    maxCount = 100, rectScaleFactor = 0.01, rectRotFactor = 1, antiAliasing = False, hideGui = False):
+        self.windowWidth = windowWidth
+        self.windowHeight = windowHeight
+        self.rect = Rect(self.windowWidth/2, self.windowHeight/2, self.windowWidth/4, self.windowHeight/4, 0, False)
+        super().__init__(self.windowWidth, self.windowHeight, "Mandelbrot set")
         self.firstInit = False
+        self.renderingScale = renderingScale
+        self.origin = origin
+        self.graphHeight = graphHeight
+        self.graphWidth = Decimal(self.windowWidth/self.windowHeight) * self.graphHeight
+        self.maxCount = maxCount
+        self.rectScaleFactor = rectScaleFactor
+        self.rectRotFactor = rectRotFactor
+        self.antiAliasing = antiAliasing
+        self.hideGui = hideGui
+        self.isNew = True
+        self.newRenderingScale = self.renderingScale
+        self.M = scaleMatrix(self.graphWidth/Decimal(self.windowWidth))
+        self.shiftPressed = False
 
     def on_draw(self):
-        global isNew
-        global TRANSLATION
         if not self.firstInit:
             self.firstInit=True
-            loop()
+            self.render()
         else:
             arcade.start_render()
-            if isReady:
-                if isNew:
+            if self.isReady:
+                if self.isNew:
                     arcade.cleanup_texture_cache()
-                isNew = False
-                arcade.draw_scaled_texture_rectangle(round(WINDOW_WIDTH/2), round(WINDOW_HEIGHT/2), arcade.load_texture("graph.png"), 1/RENDERING_SCALE)
-                h = str(int(WINDOW_HEIGHT * NEW_RENDERING_SCALE))
-                w = str(int(WINDOW_WIDTH * NEW_RENDERING_SCALE))
-                resetTransformationParameters()
-                if not HIDE_GUI:
-                    arcade.draw_text("H: show/hide UI\nMouse sx: position rectangle\nMouse dx: start rendering\nMouse scroll: change rectangle zoom\nShift + Mouse scroll: rotate rectangle\nMouse wheel click: show/hide rectangle\n+/-: Increase/decrease rendering quality\nR: Reset rectangle rotation\nS: Snap rectangle rotation\nA: Antialiasing on/off", 0, WINDOW_HEIGHT-120, arcade.color.WHITE, 9)
-                    arcade.draw_text("NEXT RENDERING AT {}x{}, ANTI ALIASING = {}".format(w, h, ANTI_ALIASING), 0, 0, arcade.color.WHITE, 9)
+                self.isNew = False
+                arcade.draw_scaled_texture_rectangle(round(self.windowWidth/2), round(self.windowHeight/2), arcade.load_texture("graph.png"), 1/self.renderingScale)
+                h = str(int(self.windowHeight * self.newRenderingScale))
+                w = str(int(self.windowWidth * self.newRenderingScale))
+                if not self.hideGui:
+                    arcade.draw_text("H: show/hide UI\nMouse sx: position rectangle\nMouse dx: start rendering\nMouse scroll: change rectangle zoom\nShift + Mouse scroll: rotate rectangle\nMouse wheel click: show/hide rectangle\n+/-: Increase/decrease rendering quality\nR: Reset rectangle rotation\nS: Snap rectangle rotation\nA: Antialiasing on/off", 0, self.windowHeight-120, arcade.color.WHITE, 9)
+                    arcade.draw_text("NEXT RENDERING AT {}x{}, ANTI ALIASING = {}".format(w, h, self.antiAliasing), 0, 0, arcade.color.WHITE, 9)
                 if self.rect.visibility:
                     self.rect.draw()
 
@@ -220,32 +190,27 @@ class Visualizer(arcade.Window):
             self.rect.visibility = not self.rect.visibility
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
-        if SHIFT_PRESSED:
+        if self.shiftPressed:
             if scroll_y < 0:
-                self.rect.rotateBy(-RECT_ROT_FACTOR)
+                self.rect.rotateBy(-self.rectRotFactor)
             else:
-                self.rect.rotateBy(RECT_ROT_FACTOR)
+                self.rect.rotateBy(self.rectRotFactor)
         else:
             if self.rect.visibility:
                 if scroll_y < 0:
-                    self.rect.scale(1-RECT_SCALE_FACTOR)
+                    self.rect.scale(1-self.rectScaleFactor)
                 else:
-                    self.rect.scale(1+RECT_SCALE_FACTOR)
+                    self.rect.scale(1+self.rectScaleFactor)
     def on_key_press(self, symbol, modifiers):
-        global NEW_RENDERING_SCALE
-        global GRAPH_WIDTH
-        global GRAPH_HEIGHT
-        global ANTI_ALIASING
-        global HIDE_GUI
         if symbol == arcade.key.PLUS:
-            NEW_RENDERING_SCALE += 1
+            self.newRenderingScale += 1
         elif symbol == arcade.key.MINUS:
-            if NEW_RENDERING_SCALE != 1:
-                NEW_RENDERING_SCALE -= 1
+            if self.newRenderingScale != 1:
+                self.newRenderingScale -= 1
         elif symbol == arcade.key.A:
-            ANTI_ALIASING = not ANTI_ALIASING
+            self.antiAliasing = not self.antiAliasing
         elif symbol == arcade.key.H:
-            HIDE_GUI = not HIDE_GUI
+            self.hideGui = not self.hideGui
         elif symbol == arcade.key.R:
             self.rect.rotateTo(0)
         elif symbol == arcade.key.S:
@@ -259,39 +224,76 @@ class Visualizer(arcade.Window):
             else:
                 self.rect.rotateTo(270)
         elif symbol == arcade.key.LSHIFT:
-            global SHIFT_PRESSED
-            SHIFT_PRESSED = True
+            self.shiftPressed = True
         elif symbol == arcade.key.ENTER:
+            self.renderingScale = self.newRenderingScale
             if self.rect.visibility:
-                global ORIGIN
-                global GRAPH_WIDTH
-                global GRAPH_HEIGHT
-                global M
                 cursorPos = numpy.array([   Decimal(self.rect.centerX),
                                             Decimal(self.rect.centerY),
                                             Decimal(1)])
-                rectPos = arcadePointToCenter(cursorPos)
-                returnToCenterMatrix=translationMatrix(-ORIGIN[0], -ORIGIN[1])
-                ORIGIN = numpy.dot(M, rectPos)
-                T = translationMatrix(ORIGIN[0], ORIGIN[1])
+                rectPos = self.arcadePointToCenter(cursorPos)
+                returnToCenterMatrix=translationMatrix(-self.origin[0], -self.origin[1])
+                self.origin = numpy.dot(self.M, rectPos)
+                T = translationMatrix(self.origin[0], self.origin[1])
                 angle = Decimal(math.radians(self.rect.rotation))
                 R = rotationMatrix(angle)
-                S = scaleMatrix(Decimal(self.rect.width / WINDOW_WIDTH))
-                M = numpy.dot(numpy.dot(numpy.dot(numpy.dot(T,R),S),returnToCenterMatrix),M)
-                GRAPH_WIDTH = GRAPH_WIDTH * Decimal(self.rect.width / WINDOW_WIDTH)
-                GRAPH_HEIGHT = GRAPH_HEIGHT * Decimal(self.rect.height / WINDOW_HEIGHT)
-            arcade.start_render()
-            arcade.draw_xywh_rectangle_filled(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, arcade.color.BLACK)
-            arcade.draw_text("LOADING...", 0, 0, arcade.color.WHITE)
-            arcade.finish_render()
-            loop()
+                S = scaleMatrix(Decimal(self.rect.width / self.windowWidth))
+                self.M = numpy.dot(numpy.dot(numpy.dot(numpy.dot(T,R),S),returnToCenterMatrix),self.M)
+                self.graphWidth = self.graphWidth * Decimal(self.rect.width / self.windowWidth)
+                self.graphHeight = self.graphHeight * Decimal(self.rect.height / self.windowHeight)
+            self.render()
+
     def on_key_release(self, symbol, modifiers):
-        global SHIFT_PRESSED
-        SHIFT_PRESSED = False
+        self.shiftPressed = False
+
+    def render(self):
+        global VAL_MATRIX
+        global MAX_VALUE
+        global COMPLETED_ROWS
+        global ROWS
+        global STARTING_TIME
+        COMPLETED_ROWS = 0
+        MAX_VALUE = 0
+        self.isReady = False
+        arcade.start_render()
+        arcade.draw_xywh_rectangle_filled(0, 0, self.windowWidth, self.windowHeight, arcade.color.BLACK)
+        arcade.draw_text("LOADING...", 0, 0, arcade.color.WHITE)
+        arcade.finish_render()
+        VAL_MATRIX = [[0 for col in range(self.windowWidth*self.renderingScale)] for row in range(self.windowHeight*self.renderingScale)]
+        pixels = [[0 for col in range(self.windowWidth*self.renderingScale*3)] for row in range(self.windowHeight*self.renderingScale)]
+        pool = mp.Pool(mp.cpu_count())
+        processes = []
+        STARTING_TIME = time()
+        ROWS = self.windowHeight * self.renderingScale
+        for row in range(self.windowHeight*self.renderingScale):
+            process = pool.apply_async(loop, args=(row, self.windowWidth, self.windowHeight, self.renderingScale, self.M, self.antiAliasing, self.maxCount), callback=callback_result)
+            processes.append(process)
+        pool.close()
+        pool.join()
+        for row in range(0, self.windowHeight*self.renderingScale):
+            for col in range(0, self.windowWidth*self.renderingScale):
+                if VAL_MATRIX[row][col] != 0:
+                    av = hsl2arcade(0.038+(VAL_MATRIX[row][col]-MIN_VALUE)/(MAX_VALUE-MIN_VALUE)*0.4, 1, 0.5)
+                    pixels[row][col*3]=av[0]
+                    pixels[row][col*3+1]=av[1]
+                    pixels[row][col*3+2]=av[2]
+        f = open('graph.png', 'wb')
+        w = png.Writer(self.windowWidth*self.renderingScale, self.windowHeight*self.renderingScale, greyscale=False)
+        w.write(f, pixels)
+        f.close()
+        self.isNew = True
+        self.isReady = True
+        s.call(['notify-send','Mandelbrot set','Rendering has been completed.'])
+
+    def arcadePointToCenter(self, p):
+        return numpy.array([Decimal(- self.windowWidth / 2) + p[0],
+                            Decimal(- self.windowHeight / 2) + p[1],
+                            Decimal(1)])
+
 
 
 def main():
-    app = Visualizer()
+    app = Visualizer(683, 384)
     arcade.start_render()
     arcade.set_background_color(arcade.color.BLACK)
     arcade.draw_text("RENDERING...", 1, 1, arcade.color.WHITE, 12)
