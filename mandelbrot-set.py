@@ -14,12 +14,11 @@ WINDOW_HEIGHT = 384
 
 # The image will be rendered in WINDOW_WIDTH*RENDERING_SCALE x WINDOW_HEIGHT*RENDERING_SCALE,
 RENDERING_SCALE = 1
-ORIGIN = numpy.array([  [Decimal(0)],
-                        [Decimal(0)],
-                        [Decimal(1)]])
-GRAPH_WIDTH = Decimal(3.557291667)
+ORIGIN = numpy.array([Decimal(0), Decimal(0), Decimal(1)])
+
 GRAPH_HEIGHT = Decimal(2)
-MAX_COUNT = 25
+GRAPH_WIDTH = Decimal(WINDOW_WIDTH/WINDOW_HEIGHT) * GRAPH_HEIGHT
+MAX_COUNT = 100
 RECT_SCALE_FACTOR=0.1
 RECT_ROT_FACTOR=1
 ANTI_ALIASING = False
@@ -34,36 +33,35 @@ TWOPLACES = Decimal(10) ** -2
 
 
 def scaleMatrix(s):
-    return numpy.matrix([
-        [s, 0,  0],
-        [0, s,  0],
-        [0, 0,  1]
-    ])
+    return [
+        [s, Decimal(0),  Decimal(0)],
+        [Decimal(0), s,  Decimal(0)],
+        [Decimal(0), Decimal(0),  Decimal(1)]
+    ]
 def translationMatrix(x, y):
-    return numpy.matrix([
+    return [
         [Decimal(1),    Decimal(0), x           ],
         [Decimal(0),    Decimal(1), y           ],
         [Decimal(0),    Decimal(0), Decimal(1)  ]
-    ])
+    ]
 
 def rotationMatrix(angle):
-    return numpy.matrix([
+    return [
         [Decimal(math.cos(angle)),  Decimal(-math.sin(angle)),  Decimal(0)  ],
         [Decimal(math.sin(angle)),  Decimal(math.cos(angle)),   Decimal(0)  ],
         [Decimal(0),                Decimal(0),                 Decimal(1)  ]
-    ])
+    ]
 
 
 def applyTransformations(v, list):
     for m in list:
-        v = m.dot(v)
+        v = numpy.dot(m,v)
     return v
 
-
 def iteration(z, c):
-    return  numpy.array([   [z[0][0]*z[0][0]-z[1][0]*z[1][0]+c[0][0]],
-                            [2*z[0][0]*z[1][0]+c[1][0]]
-                            [Decimal(1)]])
+    return numpy.array([z[0] ** 2 - z[1] ** 2 + c[0],
+                        2 * z[0] * z[1] + c[1],
+                        Decimal(1)])
 
 def hsl2arcade(h, s, l):
     color=colorsys.hsv_to_rgb(h, s, l)
@@ -78,34 +76,13 @@ def resetTransformationParameters():
 
 
 # For elements in the arcade coordinates
-def screenPointToCenter(p, w, h):
-    return numpy.array([[Decimal(- w / 2 + p[0][0])],
-                        [Decimal(- h / 2 + p[1][0])],
-                        [Decimal(1)]])
+def arcadePointToCenter(p):
+    return numpy.array([Decimal(- WINDOW_WIDTH / 2) + p[0],
+                        Decimal(- WINDOW_HEIGHT / 2) + p[1],
+                        Decimal(1)])
 
-# For elements in the image coordinages
-def imagePointToCenter(p, w, h):
-    return numpy.array([[Decimal(- w / 2 + p[0][0])],
-                        [Decimal(h / 2 - p[1][0])],
-                        [Decimal(1)]])
-SS = numpy.matrix([
-    [Decimal(GRAPH_WIDTH/WINDOW_WIDTH), Decimal(0), Decimal(0)],
-    [Decimal(0), Decimal(GRAPH_HEIGHT/WINDOW_HEIGHT), Decimal(0)],
-    [Decimal(0), Decimal(0), Decimal(1)]])
 
-ST = numpy.matrix([
-    [Decimal(1),    Decimal(0), ORIGIN[0][0]],
-    [Decimal(0),    Decimal(1), ORIGIN[1][0]],
-    [Decimal(0),    Decimal(0), Decimal(1)]
-])
-
-SR = numpy.matrix([
-    [Decimal(1),    Decimal(0), Decimal(0)],
-    [Decimal(0),    Decimal(1), Decimal(0)],
-    [Decimal(0),    Decimal(0), Decimal(1)]
-])
-
-M = ST.dot(SR).dot(SS)
+M = scaleMatrix(GRAPH_WIDTH/Decimal(WINDOW_WIDTH))
 
 
 def loop():
@@ -115,69 +92,38 @@ def loop():
     global ROTATED
     global ORIGIN
     isReady = False
-    m = []
+    RENDERING_SCALE = NEW_RENDERING_SCALE
+    m = [[0 for col in range(WINDOW_WIDTH*RENDERING_SCALE*3)] for row in range(WINDOW_HEIGHT*RENDERING_SCALE)]
+    valMatrix = [[0 for col in range(WINDOW_WIDTH*RENDERING_SCALE)] for row in range(WINDOW_HEIGHT*RENDERING_SCALE)]
     startTime = time()
-    #transformations = [reference, translationMatrix(-LEFT_X, -TOP_Y)]
-    #transformations = [reference, rotationMatrix(angle), rotationMatrix(angle).dot([[LEFT_X],[TOP_Y]])]
-    for row in range(WINDOW_HEIGHT*RENDERING_SCALE):
-        m.append([])
-        for col in range(WINDOW_WIDTH*RENDERING_SCALE):
+    maxVal = 0
+    for row in range(0, WINDOW_HEIGHT*RENDERING_SCALE):
+        for col in range(0, WINDOW_WIDTH*RENDERING_SCALE):
             #print("Calculating ("+str(col)+", "+str(row)+")")
-            screenPoint = imagePointToCenter(numpy.array([ [col/RENDERING_SCALE],
-                                                            [row/RENDERING_SCALE],
-                                                            [1]]), WINDOW_WIDTH, WINDOW_HEIGHT)
-            graphPoint = M.dot(screenPoint)
+            screenPoint = numpy.array([Decimal(col/RENDERING_SCALE-WINDOW_WIDTH/2), Decimal(WINDOW_HEIGHT/2-row/RENDERING_SCALE), Decimal(1)])
+            graphPoint = numpy.dot(M, screenPoint)
             ANTI_ALIASING = False
-            av=[0,0,0]
             if ANTI_ALIASING:
-                list = (r, i),(r-quarter, i+quarter), (r+quarter, i+quarter), (r+quarter, i-quarter), (r-quarter, i-quarter)
+                list = [(r, i),(r-quarter, i+quarter), (r+quarter, i+quarter), (r+quarter, i-quarter), (r-quarter, i-quarter)]
             else:
-                list = (graphPoint,)
+                list = [(graphPoint[0],graphPoint[1])]
+            val = 0
             for c in list:
-                z = iteration(numpy.array([[Decimal(0)],
-                                           [Decimal(0)]]), c)
+                z = iteration(numpy.array([Decimal(0),
+                                           Decimal(0),
+                                           Decimal(1)]), c)
                 count = 1
-                while count < MAX_COUNT and math.isfinite(z[0][0]) and math.isfinite(z[1][0]):
+                while count < MAX_COUNT and math.isfinite(z[0]) and math.isfinite(z[1]):
                     z = iteration(z, c)
                     count += 1
-                if math.isinf(z[0][0]) or math.isinf(z[1][0]):
-                    color = hsl2arcade(count/MAX_COUNT*0.4, 1, 0.5)
-                else:
-                    color = [0, 0, 0]
-                av[0]+=color[0]
-                av[1]+=color[1]
-                av[2]+=color[2]
+                if math.isinf(z[0]) or math.isinf(z[1]):
+                    val += count
+
             if ANTI_ALIASING:
-                av[0] = av[0] / 5
-                av[1] = av[1] / 5
-                av[2] = av[2] / 5
-            m[row].append(int(av[0]))
-            m[row].append(int(av[1]))
-            m[row].append(int(av[2]))
-            # if -0.001<graphPoint[0][0]<0.001:
-            #     m[row].append(0)
-            #     m[row].append(0)
-            #     m[row].append(255)
-            # elif -0.001<graphPoint[1][0]<0.001:
-            #     m[row].append(255)
-            #     m[row].append(0)
-            #     m[row].append(0)
-            # elif graphPoint[0][0]<-0.001 and graphPoint[1][0]>0.001:
-            #     m[row].append(0)
-            #     m[row].append(0)
-            #     m[row].append(60)
-            # elif graphPoint[1][0]<-0.001 and graphPoint[0][0]>0.001:
-            #     m[row].append(60)
-            #     m[row].append(0)
-            #     m[row].append(0)
-            # elif graphPoint[0][0]>0.001 and graphPoint[1][0]>0.001:
-            #     m[row].append(0)
-            #     m[row].append(60)
-            #     m[row].append(0)
-            # else:
-            #     m[row].append(0)
-            #     m[row].append(0)
-            #     m[row].append(0)
+                val = val/5
+            valMatrix[row][col]=val
+            if val > maxVal:
+                maxVal = val
         done = row*100/(WINDOW_HEIGHT*RENDERING_SCALE)
         barLen = round(done/10)
         now = time()
@@ -190,12 +136,18 @@ def loop():
         else:
             remainingString = "                                      "
         print("\r"+"█"*barLen+"░"*(10-barLen)+" {0:.2f}%{1}".format(done, remainingString), end="")
+    for row in range(0, WINDOW_HEIGHT*RENDERING_SCALE):
+        for col in range(0, WINDOW_WIDTH*RENDERING_SCALE):
+            if valMatrix[row][col] != 0:
+                av = hsl2arcade(valMatrix[row][col]/maxVal*0.4, 1, 0.5)
+                m[row][col*3]=av[0]
+                m[row][col*3+1]=av[1]
+                m[row][col*3+2]=av[2]
     print("\r"+"██████████ 100.00% Done                                         ")
     f = open('graph.png', 'wb')
     w = png.Writer(WINDOW_WIDTH*RENDERING_SCALE, WINDOW_HEIGHT*RENDERING_SCALE, greyscale=False)
     w.write(f, m)
     f.close()
-    RENDERING_SCALE = NEW_RENDERING_SCALE
     isNew = True
     isReady = True
     s.call(['notify-send','Mandelbrot set','Rendering has been completed.'])
@@ -315,18 +267,17 @@ class Visualizer(arcade.Window):
                 global GRAPH_WIDTH
                 global GRAPH_HEIGHT
                 global M
-                cursorPos = numpy.array([ [self.rect.centerX],
-                                            [self.rect.centerY],
-                                            [1]])
-                rectPos = screenPointToCenter(cursorPos, WINDOW_WIDTH, WINDOW_HEIGHT)
-                newOrigin = M.dot(rectPos)
-                translation = newOrigin - ORIGIN
+                cursorPos = numpy.array([   Decimal(self.rect.centerX),
+                                            Decimal(self.rect.centerY),
+                                            Decimal(1)])
+                rectPos = arcadePointToCenter(cursorPos)
+                returnToCenterMatrix=translationMatrix(-ORIGIN[0], -ORIGIN[1])
+                ORIGIN = numpy.dot(M, rectPos)
+                T = translationMatrix(ORIGIN[0], ORIGIN[1])
                 angle = Decimal(math.radians(self.rect.rotation))
-                T = translationMatrix(translation[0][0], translation[1][0])
                 R = rotationMatrix(angle)
                 S = scaleMatrix(Decimal(self.rect.width / WINDOW_WIDTH))
-                M = R.dot(S).dot(T).dot(M)
-                ORIGIN = newOrigin
+                M = numpy.dot(numpy.dot(numpy.dot(numpy.dot(T,R),S),returnToCenterMatrix),M)
                 GRAPH_WIDTH = GRAPH_WIDTH * Decimal(self.rect.width / WINDOW_WIDTH)
                 GRAPH_HEIGHT = GRAPH_HEIGHT * Decimal(self.rect.height / WINDOW_HEIGHT)
             arcade.start_render()
